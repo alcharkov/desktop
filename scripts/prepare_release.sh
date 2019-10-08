@@ -62,29 +62,37 @@ CURRENT_VERSION=${PKG_VERSION%-rc-*}
 IFS='.' read MAJOR MINOR MICRO <<<"$CURRENT_VERSION"
 case $1 in
     "help")
-    echo "todo"
+        echo "todo"
     ;;
     "rc")
-    RC=${PKG_VERSION#"*-rc-"}
-    case $string in
-    ''|*[!0-9]*) 
-        msg="No release candidate on the version, assuming 0"
-        writeWarning $msg
-        RC=0
-    ;;
-    *)
-        RC=$(( RC + 1 ))
-    ;;
-    esac
-    msg="Generating ${CURRENT_VERSION} release candidate ${RC}"
-    writeInfo $msg
-    NEW_PKG_VERSION="${CURRENT_VERSION}-rc-${RC}"
-    writePackageVersion "$NEW_PKG_VERSION"
-    tagDescription="Release candidate ${RC}"
-    tag $NEW_PKG_VERSION "$tagDescription"
-    msg="locally created an rc. In order to build you'll have to"
-    writeInfo $msg
-    echo "$ git push --follow-tags ${gitOrigin} ${branch_name}:${branch_name}\n"
+        if [[ $branch_name =~ "release-.*" ]]; then
+            # RC=${PKG_VERSION#"*-rc-"}
+            IFS='-rc-' read ignore RC <<<"$PKG_VERSION"
+            case $RC in
+            ''|*[!0-9]*) 
+                msg="No release candidate on the version, assuming 0"
+                writeWarning $msg
+                RC=0
+            ;;
+            *)
+                RC=$(( RC + 1 ))
+            ;;
+            esac
+            msg="Generating ${CURRENT_VERSION} release candidate ${RC}"
+            writeInfo $msg
+            NEW_PKG_VERSION="${CURRENT_VERSION}-rc-${RC}"
+            writePackageVersion "$NEW_PKG_VERSION"
+            tagDescription="Release candidate ${RC}"
+            tag $NEW_PKG_VERSION "$tagDescription"
+            msg="locally created an rc. In order to build you'll have to"
+            writeInfo $msg
+            echo "$ git push --follow-tags ${gitOrigin} ${branch_name}:${branch_name}\n"
+        else
+            error="Can't generate a release candidate on a non release-X.Y branch"
+            writeError $error
+            exit -2
+
+        fi
     ;;
     "final")
         if [[ $branch_name =~ "release-.*" ]]; then
