@@ -21,15 +21,17 @@ trap 'echo "\"${last_command}\" command filed with exit code $?."' EXIT
 # mattermost repo might not be the origin one, we don't want to enforce that.
 org="github.com:mattermost"
 gitOrigin=`git remote -v | grep $org | grep push | awk '{print $1}'`
+if [[ -z gitOrigin ]]; then
+    msg="Can't find a mattermost remote, defaulting to origin"
+    gitOrigin="origin"
+fi
 
 function tag {
-
+    # not forcing tags, this might fail on purpose if tags are already created 
+    # as we don't want to overwrite automatically.
+    # if this happens, you should check that versions are ok and see if there are
+    # any tags locally or upstream that might conflict.
     git tag -a "v${1}" -m "Desktop Version ${2}"
-}
-
-function branchNameFromVersion {
-    $release_branch = "release-$1.$2"
-    $release_tag = "v$1.$2.$3"
 }
 
 function writePackageVersion {
@@ -44,6 +46,7 @@ branch_name=$(git symbolic-ref -q HEAD)
 branch_name=${branch_name##refs/heads/}
 branch_name=${branch_name:-HEAD}
 
+# don't run if branch is dirty, releases shouldn't be done on a dirty branch
 dirty=`git diff --quiet && echo 0 || echo 1`
 if [[ $dirty -eq 1 ]]; then
     msg="Please use this script on a clean branch"
@@ -51,7 +54,12 @@ if [[ $dirty -eq 1 ]]; then
     exit -10
 fi
 
-# TODO require jq, git
+# require jq
+if [[ ! `command -v jq` ]]; then
+    error="this script requires jq to run"
+    writeError $error
+    exit -11
+fi
 
 # get version
 PKG_VERSION=`jq -r .version package.json`
@@ -65,14 +73,19 @@ case $1 in
         echo "todo"
     ;;
     "rc")
-        if [[ $branch_name =~ "release-.*" ]]; then
-            # RC=${PKG_VERSION#"*-rc-"}
-            IFS='-rc-' read ignore RC <<<"$PKG_VERSION"
-            case $RC in
-            ''|*[!0-9]*) 
+        if [[ $branch_name =~ "release-" ]]; then
+            if [[ $PKG_VERSION =~ "-rc-" ]]; then
+                RC=${PKG_VERSION#*-rc-}
+            else
                 msg="No release candidate on the version, assuming 0"
                 writeWarning $msg
                 RC=0
+            fi
+            case $RC in
+            ''|*[!0-9]*) 
+                msg="Can't guess release candidate from version, assuming 0"
+                writeWarning $msg
+                RC=1
             ;;
             *)
                 RC=$(( RC + 1 ))
@@ -95,29 +108,25 @@ case $1 in
         fi
     ;;
     "final")
-        if [[ $branch_name =~ "release-.*" ]]; then
+        if [[ $branch_name =~ "release-" ]]; then
             msg="Releasing v${CURRENT_VERSION}"
             writeInfo $msg
             NEW_PKG_VERSION=${CURRENT_VERSION}
+            writePackageVersion $NEW_PKG_VERSION
             tagDescription="Released on `date -u`" 
             tag $NEW_PKG_VERSION $tagDescription
             msg="locally created a release. In order to build you'll have to:"
             writeInfo $msg
             echo "$ git push --follow-tags ${gitOrigin} ${branch_name}:${branch_name}"
-            
-
         else
             error="Can't release on a non release-X.Y branch"
             writeError $error
             exit -2
         fi
-
     ;;
     "branch")
         # Quality releases should run from a release branch
-        msg="current branch: ${branch_name}"
-        writeInfo $msg
-        if [[ $branch_name =~ release-.* ]]; then
+        if [[ $branch_name =~ "release-" ]]; then
             NEW_BRANCH_VERSION="${MAJOR}.$(( MINOR + 1 ))"
             NEW_BRANCH_NAME="release-${NEW_BRANCH_VERSION}"
             msg="Doing a quality branch: ${NEW_BRANCH_NAME}"
@@ -130,7 +139,6 @@ case $1 in
             fi
 
             NEW_PKG_VERSION="${NEW_BRANCH_VERSION}.0-rc-0"
-            #git pull --ff-only $gitOrigin ${branch_name}
             git checkout -b "${NEW_BRANCH_NAME}"
             writePackageVersion "${NEW_PKG_VERSION}"
             tagDescription="Quality branch"
@@ -140,7 +148,7 @@ case $1 in
             echo "$ git push --follow-tags ${gitOrigin} ${NEW_BRANCH_NAME}:${NEW_BRANCH_NAME}"
 
         else
-            if [[ $branch_name -ne "master" ]]; then
+            if [[ $branch_name != "master" ]]; then
                 msg="You are branching on ${branch_name} instead of master or a relase-branch"
                 writeWarning $msg
                 read -p "Do you wish to continue? [y/n]" -n 1 -r
@@ -176,8 +184,6 @@ case $1 in
             echo "$ git push ${gitOrigin} ${branch_name}:${branch_name}"
 
         fi
-
-
     ;;
     *)
         writeError "Only branch|rc|final parameters are accepted"
