@@ -226,7 +226,6 @@ jobs:
     executor: aws
     steps:
       - checkout
-      - run: apt-get update && apt-get -y install jq
       - attach_workspace:
           at: ./dist
       - aws-s3/copy:
@@ -238,7 +237,6 @@ jobs:
     executor: github
     steps:
       - checkout
-      - run: apt-get update && apt-get -y install jq
       - attach_workspace:
           at: ./dist
       - run:
